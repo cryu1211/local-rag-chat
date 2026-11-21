@@ -1,0 +1,5 @@
+The planned language model runs locally through Ollama.
+The total context limit is 6,000 tokens, including reserved output tokens.
+The future prompt builder must count the complete serialized prompt, including
+instructions, the question, history, retrieved text, and source labels.
+The first milestone only retrieves chunks; it does not generate answers.
