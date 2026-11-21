@@ -1,8 +1,13 @@
 """Composition root for the retrieval-only MVP."""
 
 import argparse
+import os
+import sys
 from pathlib import Path
 
+# macOS PyTorch/FAISS wheels can conflict in OpenMP worker threads.
+if sys.platform == "darwin":
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 from .chunking import chunk_documents
 from .embeddings import SentenceTransformerEmbedder
