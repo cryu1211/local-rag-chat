@@ -126,7 +126,7 @@ def test_real_end_to_end_rag_query():
     environment = os.environ.copy()
     environment.pop("OMP_NUM_THREADS", None)  # Exercise this CLI's own startup default.
     completed = subprocess.run(
-        [sys.executable, "-m", "local_rag_chat.rag_cli", "examples/architecture.md", "examples/context.txt",
+        [sys.executable, "-m", "local_rag_chat", "examples/architecture.md", "examples/context.txt",
          "--model-path", embedding, "--tokenizer-path", tokenizer,
          "--model", os.environ.get("OLLAMA_TEST_MODEL", "qwen2.5:1.5b"),
          "--host", os.environ.get("OLLAMA_TEST_HOST", "http://127.0.0.1:11434"),

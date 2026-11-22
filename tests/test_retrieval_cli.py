@@ -6,7 +6,7 @@ import sys
 import numpy as np
 import pytest
 
-from local_rag_chat import cli
+from local_rag_chat import retrieval_cli
 
 
 def test_cli_ingestion_to_real_faiss_and_source_output(tmp_path, monkeypatch, capsys):
@@ -27,11 +27,11 @@ def test_cli_ingestion_to_real_faiss_and_source_output(tmp_path, monkeypatch, ca
         def embed_query(self, text):
             return self.embed_documents([text])[0]
 
-    monkeypatch.setattr(cli, "SentenceTransformerEmbedder", FakeEmbedder)
+    monkeypatch.setattr(retrieval_cli, "SentenceTransformerEmbedder", FakeEmbedder)
     arguments = [str(first), str(second), "--model-path", str(tmp_path),
                  "--query", "What surrounds Saturn?", "--top-k", "1"]
 
-    cli.main(arguments)
+    retrieval_cli.main(arguments)
 
     output = capsys.readouterr().out
     assert "Indexed 2 chunks from 2 document(s)." in output
@@ -40,8 +40,8 @@ def test_cli_ingestion_to_real_faiss_and_source_output(tmp_path, monkeypatch, ca
     assert "Saturn has rings." in output
     assert "Cats purr." not in output
 
-    cli.main([str(first), "--model-path", str(tmp_path), "--query", "Saturn",
-              "--min-score", "0.5"])
+    retrieval_cli.main([str(first), "--model-path", str(tmp_path), "--query", "Saturn",
+                        "--min-score", "0.5"])
     assert "No chunks met" in capsys.readouterr().out
 
 
@@ -49,7 +49,7 @@ def test_empty_corpus_exits_before_loading_model(tmp_path, capsys):
     source = tmp_path / "empty.txt"
     source.write_text(" \n", encoding="utf-8")
     with pytest.raises(SystemExit) as error:
-        cli.main([str(source), "--model-path", str(tmp_path / "missing"), "--query", "q"])
+        retrieval_cli.main([str(source), "--model-path", str(tmp_path / "missing"), "--query", "q"])
     assert error.value.code == 1
     assert "no non-blank text" in capsys.readouterr().err
 
@@ -71,7 +71,7 @@ def test_cli_with_real_local_model_in_fresh_process(tmp_path):
     environment["HF_HUB_OFFLINE"] = "1"
     environment["TRANSFORMERS_OFFLINE"] = "1"
     completed = subprocess.run(
-        [sys.executable, "-X", "faulthandler", "-m", "local_rag_chat",
+        [sys.executable, "-X", "faulthandler", "-m", "local_rag_chat.retrieval_cli",
          str(first), str(second), "--model-path", model_path,
          "--query", "What surrounds Saturn?", "--top-k", "2"],
         env=environment,

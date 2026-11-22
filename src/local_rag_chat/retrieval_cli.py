@@ -1,4 +1,4 @@
-"""Composition root for the retrieval-only MVP."""
+"""Command-line entry point for document ingestion and retrieval-only queries."""
 
 import argparse
 import os
@@ -60,3 +60,7 @@ def main(argv: list[str] | None = None) -> None:
         )
         print(f"path={chunk.source}")
         print(chunk.text)
+
+
+if __name__ == "__main__":
+    main()

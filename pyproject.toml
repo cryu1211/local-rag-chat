@@ -19,7 +19,7 @@ dependencies = [
 dev = ["pytest>=8,<10"]
 
 [project.scripts]
-local-rag = "local_rag_chat.cli:main"
+local-rag = "local_rag_chat.retrieval_cli:main"
 local-llm = "local_rag_chat.llm_cli:main"
 local-rag-query = "local_rag_chat.rag_cli:main"
 
