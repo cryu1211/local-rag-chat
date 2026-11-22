@@ -12,6 +12,7 @@ dependencies = [
     "numpy>=1.26,<3",
     "sentence-transformers>=3.0,<6",
     "faiss-cpu>=1.8,<2",
+    "tokenizers>=0.19,<1",
 ]
 
 [project.optional-dependencies]

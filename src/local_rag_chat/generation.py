@@ -3,6 +3,9 @@
 from typing import Protocol
 
 
+CONTEXT_WINDOW = 6_000
+
+
 class LLMError(RuntimeError):
     """The inference runtime could not complete a generation request."""
 
@@ -12,6 +15,6 @@ class LLMClient(Protocol):
         """Generate text with an explicit maximum number of output tokens.
 
         Raise ValueError for invalid inputs and LLMError for runtime failures.
-        Complete input-prompt token budgeting belongs to the future prompt builder.
+        Complete input-prompt token budgeting belongs to the prompt builder.
         """
         ...

@@ -12,6 +12,7 @@ import pytest
 from local_rag_chat import llm_cli
 from local_rag_chat.generation import LLMError
 from local_rag_chat.ollama import OllamaClient
+from local_rag_chat.prompting import build_prompt
 
 
 LOCAL_MODEL_INFO = {"model_info": {"general.architecture": "qwen2"}}
@@ -157,7 +158,7 @@ def test_invalid_timeouts_rejected(timeout):
 
 
 @pytest.mark.parametrize("prompt,max_tokens", [(" ", 32), ("Hello", 0), ("Hello", -1),
-                                               ("Hello", 6000), ("Hello", 2.5)])
+                                               ("Hello", 6000), ("Hello", 2.5), ("Hello", True)])
 def test_invalid_generation_input_fails_before_network_request(fake_ollama, prompt, max_tokens):
     with pytest.raises(ValueError):
         OllamaClient(host=fake_ollama.host).generate(prompt, max_tokens)
@@ -203,3 +204,78 @@ def test_real_ollama_smoke():
         host=os.environ.get("OLLAMA_TEST_HOST", "http://127.0.0.1:11434"),
     )
     assert client.generate("Explain what RAG is in one sentence.", 128).strip()
+
+
+QWEN_MODEL_INFO = {
+    "details": {"format": "gguf"},
+    "model_info": {
+        "general.architecture": "qwen2", "tokenizer.ggml.model": "gpt2",
+        "tokenizer.ggml.pre": "qwen2", "tokenizer.ggml.add_bos_token": False,
+    },
+}
+
+
+def test_bounded_generation_uses_exact_wire_prompt_and_output_reserve(fake_ollama, qwen_tokenizer):
+    prompt = build_prompt("What is known?", [], qwen_tokenizer, reserved_output_tokens=32)
+    fake_ollama.replies = [
+        (200, QWEN_MODEL_INFO),
+        (200, {**COMPLETE_RESPONSE, "prompt_eval_count": prompt.usage.total, "eval_count": 12}),
+    ]
+    client = OllamaClient(host=fake_ollama.host, prompt_tokenizer=qwen_tokenizer)
+
+    assert client.generate(prompt.text, prompt.reserved_output_tokens) == COMPLETE_RESPONSE["response"]
+    request = fake_ollama.requests[1][1]
+    assert request["prompt"] == prompt.text
+    assert request["raw"] is True
+    assert request["truncate"] is False
+    assert request["shift"] is False
+    assert request["options"]["num_predict"] == prompt.reserved_output_tokens
+    assert request["options"]["num_ctx"] == 6000
+
+
+def test_bounded_client_rechecks_modified_prompt_before_network_request(fake_ollama, qwen_tokenizer):
+    client = OllamaClient(host=fake_ollama.host, prompt_tokenizer=qwen_tokenizer)
+    with pytest.raises(ValueError, match="exceeds the 6000-token"):
+        client.generate("x" * 6000, 32)
+    assert fake_ollama.requests == []
+    with pytest.raises(ValueError, match="same model"):
+        OllamaClient(model="different-model", prompt_tokenizer=qwen_tokenizer)
+
+
+@pytest.mark.parametrize("key,value", [
+    ("general.architecture", "llama"), ("tokenizer.ggml.model", "llama"),
+    ("tokenizer.ggml.pre", "unknown"), ("tokenizer.ggml.add_bos_token", True),
+])
+def test_bounded_client_rejects_unsupported_runtime_tokenizers(fake_ollama, qwen_tokenizer, key, value):
+    info = {**QWEN_MODEL_INFO, "model_info": {**QWEN_MODEL_INFO["model_info"], key: value}}
+    fake_ollama.replies = [(200, info)]
+    prompt = build_prompt("Question?", [], qwen_tokenizer)
+    with pytest.raises(LLMError, match="supported Qwen2 GGUF byte-BPE"):
+        OllamaClient(host=fake_ollama.host, prompt_tokenizer=qwen_tokenizer).generate(prompt.text, 32)
+    assert len(fake_ollama.requests) == 1
+
+
+@pytest.mark.parametrize("counts", [{}, {"prompt_eval_count": 6001, "eval_count": 1},
+                                     {"prompt_eval_count": 100, "eval_count": 33}])
+def test_bounded_client_checks_runtime_reported_counts(fake_ollama, qwen_tokenizer, counts):
+    fake_ollama.replies = [(200, QWEN_MODEL_INFO), (200, {**COMPLETE_RESPONSE, **counts})]
+    prompt = build_prompt("Question?", [], qwen_tokenizer)
+    with pytest.raises(LLMError, match="do not satisfy"):
+        OllamaClient(host=fake_ollama.host, prompt_tokenizer=qwen_tokenizer).generate(prompt.text, 32)
+
+
+def test_real_ollama_bounded_prompt():
+    tokenizer_path = os.environ.get("LOCAL_QWEN_TOKENIZER_PATH")
+    if os.environ.get("RUN_OLLAMA_SMOKE") != "1" or not tokenizer_path:
+        pytest.skip("Set RUN_OLLAMA_SMOKE=1 and LOCAL_QWEN_TOKENIZER_PATH for bounded inference.")
+    from pathlib import Path
+    from local_rag_chat.tokenization import QwenPromptTokenizer
+
+    model = os.environ.get("OLLAMA_TEST_MODEL", "qwen2.5:1.5b")
+    tokenizer = QwenPromptTokenizer(Path(tokenizer_path), model=model)
+    prompt = build_prompt("What information is available?", [], tokenizer, reserved_output_tokens=64)
+    client = OllamaClient(
+        model=model, host=os.environ.get("OLLAMA_TEST_HOST", "http://127.0.0.1:11434"),
+        prompt_tokenizer=tokenizer,
+    )
+    assert client.generate(prompt.text, prompt.reserved_output_tokens).strip()

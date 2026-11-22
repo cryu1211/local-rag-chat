@@ -7,10 +7,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-from .generation import LLMError
-
-
-CONTEXT_WINDOW = 6_000
+from .generation import CONTEXT_WINDOW, LLMError
+from .tokenization import QwenPromptTokenizer
 
 
 class _NoRedirects(HTTPRedirectHandler):
@@ -26,6 +24,7 @@ class OllamaClient:
         model: str = "qwen2.5:1.5b",
         host: str = "http://127.0.0.1:11434",
         timeout: float = 120.0,
+        prompt_tokenizer: QwenPromptTokenizer | None = None,
     ) -> None:
         if not model.strip():
             raise ValueError("Model name must not be blank.")
@@ -44,10 +43,13 @@ class OllamaClient:
             raise ValueError("Ollama host port must be between 1 and 65535.")
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("Request timeout must be a positive, finite number.")
+        if prompt_tokenizer is not None and prompt_tokenizer.model != model.strip():
+            raise ValueError("Prompt tokenizer and Ollama client must name the same model.")
 
         self.model = model.strip()
         self.host = host.rstrip("/")
         self.timeout = timeout
+        self.prompt_tokenizer = prompt_tokenizer
         # Disable HTTP proxies to prevent routing prompts through another server
         # Reject redirects as well, so requests cannot silently leave the configured local endpoint.
         self._http = build_opener(ProxyHandler({}), _NoRedirects())
@@ -55,18 +57,28 @@ class OllamaClient:
     def generate(self, prompt: str, max_tokens: int) -> str:
         if not prompt.strip():
             raise ValueError("Prompt must not be blank.")
-        if not isinstance(max_tokens, int) or not 0 < max_tokens < CONTEXT_WINDOW:
+        if type(max_tokens) is not int or not 0 < max_tokens < CONTEXT_WINDOW:
             raise ValueError(f"Maximum output tokens must be an integer from 1 to {CONTEXT_WINDOW-1}.")
+        bound = None
+        if self.prompt_tokenizer is not None:
+            bound = self.prompt_tokenizer.token_upper_bound(prompt)
+            # Recheck the output token limit against the context window, since the prompt may have been truncated
+            if bound + max_tokens > CONTEXT_WINDOW:
+                raise ValueError(
+                    f"Serialized prompt bound {bound} plus {max_tokens} output tokens "
+                    f"exceeds the {CONTEXT_WINDOW}-token context window."
+                )
 
         # A local Ollama server can also proxy cloud models. Check the model before
         # sending any prompt;
         info = self._post_json("/api/show", {"model": self.model})
         if info.get("remote_host") or info.get("remote_model"):
             raise LLMError(f"Model '{self.model}' uses remote inference; choose a local model.")
-        if not isinstance(info.get("model_info"), dict) or not info["model_info"]:
+        metadata = info.get("model_info")
+        if not isinstance(metadata, dict) or not metadata:
             raise LLMError(f"Cannot verify local model metadata for '{self.model}'.")
 
-        result = self._post_json("/api/generate", {
+        payload: dict[str, object] = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
@@ -75,7 +87,30 @@ class OllamaClient:
                 "num_ctx": CONTEXT_WINDOW,
                 "temperature": 0,
             },
-        })
+        }
+        if bound is not None:
+            # The byte bound only applies to this text tokenizer. Fail closed for
+            # other architectures, tokenization policies, or model formats.
+            details = info.get("details", {})
+            if (
+                not isinstance(details, dict) or details.get("format") != "gguf"
+                or metadata.get("general.architecture") != "qwen2"
+                or metadata.get("tokenizer.ggml.model") != "gpt2"
+                or metadata.get("tokenizer.ggml.pre") != "qwen2"
+                or metadata.get("tokenizer.ggml.add_bos_token") is not False
+                or metadata.get("tokenizer.ggml.add_eos_token") not in (None, False)
+            ):
+                raise LLMError("Bounded generation requires the supported Qwen2 GGUF byte-BPE model.")
+            payload.update({"raw": True, "truncate": False, "shift": False})
+        result = self._post_json("/api/generate", payload)
+        if bound is not None:
+            input_tokens = result.get("prompt_eval_count")
+            output_tokens = result.get("eval_count")
+            if (
+                type(input_tokens) is not int or type(output_tokens) is not int
+                or not 0 <= input_tokens <= bound or not 0 <= output_tokens <= max_tokens
+            ):
+                raise LLMError("Ollama token counts do not satisfy the declared prompt/output bounds.")
         text = result.get("response")
         if result.get("done") is not True or not isinstance(text, str) or not text.strip():
             raise LLMError("Ollama returned an incomplete or empty text response.")
