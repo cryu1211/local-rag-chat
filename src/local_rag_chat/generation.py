@@ -1,7 +1,17 @@
-"""Future milestone: a small Generator interface and a local Ollama adapter.
+"""Runtime-independent text generation contract; no retrieval or HTTP imports."""
 
-No implementation yet. Accept a budget-checked prompt and an explicit output
-token allowance. Use a local model and loopback-only endpoint, configure the
-runtime's context and output limits, and preserve the exact serialization used
-by the prompt counter. Return answer text; leave retrieval and UI elsewhere.
-"""
+from typing import Protocol
+
+
+class LLMError(RuntimeError):
+    """The inference runtime could not complete a generation request."""
+
+
+class LLMClient(Protocol):
+    def generate(self, prompt: str, max_tokens: int) -> str:
+        """Generate text with an explicit maximum number of output tokens.
+
+        Raise ValueError for invalid inputs and LLMError for runtime failures.
+        Complete input-prompt token budgeting belongs to the future prompt builder.
+        """
+        ...

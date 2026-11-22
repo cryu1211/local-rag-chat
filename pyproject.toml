@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "local-rag-chat"
 version = "0.1.0"
-description = "A fully local document retrieval MVP for a RAG chat application"
+description = "Local document retrieval and standalone local LLM inference for a RAG application"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -19,6 +19,7 @@ dev = ["pytest>=8,<10"]
 
 [project.scripts]
 local-rag = "local_rag_chat.cli:main"
+local-llm = "local_rag_chat.llm_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
