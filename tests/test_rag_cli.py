@@ -6,7 +6,7 @@ import sys
 import numpy as np
 import pytest
 
-from local_rag_chat import rag_cli
+from local_rag_chat import application, rag_cli
 from local_rag_chat.generation import LLMError
 
 
@@ -38,8 +38,8 @@ def cli_components(monkeypatch):
                 raise self.error
             return "Saturn has rings."
 
-    monkeypatch.setattr(rag_cli, "SentenceTransformerEmbedder", FakeEmbedder)
-    monkeypatch.setattr(rag_cli, "OllamaClient", FakeLLM)
+    monkeypatch.setattr(application, "SentenceTransformerEmbedder", FakeEmbedder)
+    monkeypatch.setattr(application, "OllamaClient", FakeLLM)
     return FakeLLM
 
 

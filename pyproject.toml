@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10"]
+ui = ["streamlit>=1.40,<2"]
 
 [project.scripts]
 local-rag = "local_rag_chat.retrieval_cli:main"

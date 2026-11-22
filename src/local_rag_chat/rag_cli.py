@@ -10,15 +10,10 @@ from pathlib import Path
 if sys.platform == "darwin":
     os.environ.setdefault("OMP_NUM_THREADS", "1")
 
-from .chunking import chunk_documents
-from .embeddings import SentenceTransformerEmbedder
+from .application import index_documents
 from .generation import CONTEXT_WINDOW, LLMError
-from .index import FaissIndex
 from .loading import load_documents
-from .ollama import OllamaClient
-from .rag import DEFAULT_MIN_SCORE, NoDocumentsError, RAGService
-from .retrieval import Retriever
-from .tokenization import load_prompt_tokenizer
+from .rag import DEFAULT_MIN_SCORE
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -53,18 +48,12 @@ def main(argv: list[str] | None = None) -> None:
             raise ValueError("Maximum output tokens must be between 1 and 5999.")
 
         # Ingestion remains separate from query orchestration.
-        documents = load_documents(args.files)
-        chunks = chunk_documents(documents, args.chunk_size, args.overlap)
-        if not chunks:
-            raise NoDocumentsError("No documents are indexed: the supplied files contain no non-blank text.")
-        tokenizer = load_prompt_tokenizer(args.model, args.tokenizer_path)
-        llm = OllamaClient(
-            model=args.model, host=args.host, timeout=args.timeout, prompt_tokenizer=tokenizer,
+        corpus = index_documents(
+            load_documents(args.files), args.model_path, args.tokenizer_path,
+            model=args.model, host=args.host, timeout=args.timeout,
+            chunk_size=args.chunk_size, overlap=args.overlap,
         )
-        embedder = SentenceTransformerEmbedder(args.model_path)
-        index = FaissIndex(chunks, embedder.embed_documents([chunk.text for chunk in chunks]))
-        service = RAGService(Retriever(embedder, index), llm, tokenizer)
-        result = service.query(
+        result = corpus.service.query(
             args.query, top_k=args.top_k, min_score=args.min_score,
             reserved_output_tokens=args.max_tokens, system_instructions=args.system_instructions,
         )

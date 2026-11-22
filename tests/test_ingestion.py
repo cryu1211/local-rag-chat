@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from local_rag_chat.chunking import chunk_documents
-from local_rag_chat.loading import load_documents
+from local_rag_chat.loading import document_from_bytes, load_documents
 from local_rag_chat.models import Document
 
 
@@ -32,6 +32,16 @@ def test_rejects_unsupported_missing_and_non_utf8_files(tmp_path):
         load_documents([invalid])
     with pytest.raises(ValueError, match="at least one"):
         load_documents([])
+
+
+def test_upload_bytes_use_the_same_text_loading_rules():
+    assert document_from_bytes(Path("notes.MD"), b"\xef\xbb\xbf# Notes") == Document(
+        Path("notes.MD"), "# Notes",
+    )
+    with pytest.raises(ValueError, match="Unsupported file type"):
+        document_from_bytes(Path("notes.pdf"), b"text")
+    with pytest.raises(ValueError, match="UTF-8"):
+        document_from_bytes(Path("notes.txt"), b"\xff")
 
 
 def test_chunk_overlap_covers_text_without_redundant_tail():
