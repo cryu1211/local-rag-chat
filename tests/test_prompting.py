@@ -24,6 +24,8 @@ def test_small_prompt_preserves_sources_grounding_and_accounting(qwen_tokenizer)
     assert prompt.skipped == ()
     assert "Answer concisely." in prompt.text
     assert GROUNDING_INSTRUCTIONS in prompt.text
+    assert "Do not generate citations or a source list." in prompt.text
+    assert "Cite supporting sources" not in prompt.text
     assert '[S1] {"source": "limits.md", "path": "docs/limits.md", "chunk_id": 7' in prompt.text
     assert hit.chunk.text in prompt.text
     assert prompt.text.endswith("<|im_start|>assistant\n")

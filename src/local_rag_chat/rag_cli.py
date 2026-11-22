@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--chunk-size", type=int, default=600, help="Characters per chunk")
     parser.add_argument("--overlap", type=int, default=100)
     parser.add_argument("--system-instructions", help="Additional instructions; grounding rules remain required")
-    parser.add_argument("--debug", action="store_true", help="Print retrieval and token-budget JSON to stderr")
+    parser.add_argument("--debug", action="store_true", help="Print chunk text, metadata, and token-budget JSON to stderr")
     args = parser.parse_args(argv)
 
     try:
@@ -72,10 +72,13 @@ def main(argv: list[str] | None = None) -> None:
         parser.exit(1, f"error: {error}\n")
 
     print(result.answer)
-    if result.sources:
-        print("\nContext sources:")
-        for i, hit in enumerate(result.sources, start=1):
-            print(f"[S{i}] {hit.chunk.source} chunk_id={hit.chunk.chunk_id} cosine={hit.score:.4f}")
+    if result.source_files:
+        print("\nSource files:")
+        filenames = [path.name for path in result.source_files]
+        for path in result.source_files:
+            # Show paths only when distinct files have the same display name.
+            name = str(path) if filenames.count(path.name) > 1 else path.name
+            print(f"- {name}")
     else:
         print(f"\nNo context sources supplied ({result.status}).")
     if args.debug:

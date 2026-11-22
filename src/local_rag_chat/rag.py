@@ -1,6 +1,7 @@
 """Query orchestration over injected retrieval, prompt, and generation components."""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, Protocol
 
 from .generation import CONTEXT_WINDOW, LLMClient
@@ -46,13 +47,19 @@ class RAGResult:
 
     @property
     def sources(self) -> tuple[SearchResult, ...]:
-        """Chunks supplied as context, in the same order as prompt labels S1, S2, ..."""
+        """Exact chunks supplied as context, independent of generated citations."""
         return self.prompt.selected
+
+    @property
+    def source_files(self) -> tuple[Path, ...]:
+        """Unique context files in selection order; equal basenames stay distinct."""
+        return tuple(dict.fromkeys(hit.chunk.source for hit in self.sources))
 
     def debug_info(self) -> dict[str, object]:
         return {
             "question": self.question,
             "status": self.status,
+            "source_files": [str(path) for path in self.source_files],
             "retrieval": {
                 "indexed_chunks": self.indexed_chunks,
                 "top_k": self.top_k,
@@ -63,7 +70,8 @@ class RAGResult:
                     {
                         "rank": i, "source": hit.chunk.source.name,
                         "path": str(hit.chunk.source), "chunk_id": hit.chunk.chunk_id,
-                        "score": hit.score, "selected": hit in self.sources,
+                        "score": hit.score, "text": hit.chunk.text,
+                        "selected": hit in self.sources,
                     }
                     for i, hit in enumerate(self.retrieved, start=1)
                 ],

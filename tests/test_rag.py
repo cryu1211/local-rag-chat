@@ -26,17 +26,18 @@ class FakeRetriever:
 
 
 class FakeLLM:
-    def __init__(self, events=None, error=None):
+    def __init__(self, events=None, error=None, answer="The limit is 6,000 tokens."):
         self.calls = []
         self.events = events if events is not None else []
         self.error = error
+        self.answer = answer
 
     def generate(self, prompt, max_tokens):
         self.events.append("generate")
         self.calls.append((prompt, max_tokens))
         if self.error:
             raise self.error
-        return "The limit is 6,000 tokens [S1]."
+        return self.answer
 
 
 def hit(text="The limit is 6,000 tokens.", score=0.9, chunk_id=0):
@@ -58,7 +59,7 @@ def test_query_coordinates_components_and_preserves_structured_evidence(qwen_tok
     assert retriever.calls == [("What is the limit?", 7, 0.4)]
     assert llm.calls == [(result.prompt.text, 64)]
     assert result.status == "generated"
-    assert result.answer == "The limit is 6,000 tokens [S1]."
+    assert result.answer == "The limit is 6,000 tokens."
     assert result.retrieved == tuple(matches)
     assert result.sources == tuple(matches)
     assert [source.chunk.chunk_id for source in result.sources] == [0, 1]
@@ -73,16 +74,50 @@ def test_query_coordinates_components_and_preserves_structured_evidence(qwen_tok
 
 
 def test_sources_include_only_context_that_fits_not_every_retrieval_match(qwen_tokenizer):
-    huge = hit("x" * 7000, 0.99, 1)
+    huge = SearchResult(Chunk(Path("excluded.md"), 1, "x" * 7000), 0.99)
     small = hit(chunk_id=2)
     llm = FakeLLM()
     result = RAGService(FakeRetriever([huge, small]), llm, qwen_tokenizer).query("What is the limit?")
 
     assert result.retrieved == (huge, small)
     assert result.sources == (small,)
+    assert result.source_files == (Path("limits.md"),)
     assert result.prompt.skipped[0].result == huge
     assert "x" * 100 not in llm.calls[0][0]
     assert result.debug_info()["retrieval"]["matches"][0]["selected"] is False
+
+
+def test_attribution_matches_prompt_metadata_and_deduplicates_files(qwen_tokenizer):
+    first = SearchResult(Chunk(Path("a/notes.md"), 7, "First evidence."), 0.95)
+    repeated_file = SearchResult(Chunk(Path("a/notes.md"), 8, "More evidence."), 0.8)
+    same_basename = SearchResult(Chunk(Path("b/notes.md"), 2, "Other evidence."), 0.7)
+    # A filename mentioned by the model must never become application attribution.
+    llm = FakeLLM(answer="An answer mentioning invented.md.")
+    result = RAGService(
+        FakeRetriever([same_basename, repeated_file, first]), llm, qwen_tokenizer,
+    ).query("What does the evidence say?")
+
+    assert result.sources == result.prompt.selected == (first, repeated_file, same_basename)
+    assert result.source_files == (Path("a/notes.md"), Path("b/notes.md"))
+    assert result.answer == llm.answer
+    prompt_metadata = [
+        json.loads(line.split(" ", 1)[1])
+        for line in llm.calls[0][0].splitlines() if line.startswith("[S")
+    ]
+    expected = [
+        {"source": hit.chunk.source.name, "path": str(hit.chunk.source),
+         "chunk_id": hit.chunk.chunk_id, "score": hit.score}
+        for hit in result.sources
+    ]
+    assert prompt_metadata == expected
+    debug = result.debug_info()
+    assert debug["source_files"] == ["a/notes.md", "b/notes.md"]
+    assert debug["prompt"]["selected"] == [
+        {"label": f"S{i}", **metadata} for i, metadata in enumerate(expected, start=1)
+    ]
+    assert {entry["text"] for entry in debug["retrieval"]["matches"]} == {
+        hit.chunk.text for hit in result.sources
+    }
 
 
 def test_no_indexed_documents_fails_without_retrieval_or_generation(qwen_tokenizer):
@@ -103,6 +138,7 @@ def test_no_retrieval_matches_abstains_without_calling_llm(qwen_tokenizer):
     assert result.answer == INSUFFICIENT_CONTEXT_ANSWER
     assert result.retrieved == ()
     assert result.sources == ()
+    assert result.source_files == ()
     assert llm.calls == []
     assert retriever.calls == [("Question?", 5, 0.8)]
     assert result.prompt.usage.upper_bound <= result.prompt.input_budget
@@ -117,6 +153,7 @@ def test_all_retrieved_context_over_budget_abstains_without_calling_llm(qwen_tok
     assert result.answer == INSUFFICIENT_CONTEXT_ANSWER
     assert result.retrieved == tuple(matches)
     assert result.sources == ()
+    assert result.source_files == ()
     assert result.prompt.skipped[0].reason == "input budget exceeded"
     assert llm.calls == []
 

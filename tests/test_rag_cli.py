@@ -36,7 +36,7 @@ def cli_components(monkeypatch):
             self.calls.append((prompt, max_tokens))
             if self.error:
                 raise self.error
-            return "Saturn has rings [S1]."
+            return "Saturn has rings."
 
     monkeypatch.setattr(rag_cli, "SentenceTransformerEmbedder", FakeEmbedder)
     monkeypatch.setattr(rag_cli, "OllamaClient", FakeLLM)
@@ -65,14 +65,17 @@ def test_cli_ingests_files_searches_real_faiss_and_prints_answer_sources_and_deb
     rag_cli.main([str(first), str(second), *arguments(tmp_path), "--max-tokens", "32"])
 
     output = capsys.readouterr()
-    assert "Saturn has rings [S1]." in output.out
-    assert f"[S1] {second.resolve()} chunk_id=0 cosine=1.0000" in output.out
+    assert output.out == "Saturn has rings.\n\nSource files:\n- b.txt\n"
     assert "a.md" not in output.out
     debug = debug_json(output.err)
     assert debug["status"] == "generated"
     assert debug["retrieval"]["indexed_chunks"] == 2
     assert debug["retrieval"]["min_score"] == 0.5
     assert debug["retrieval"]["matches"][0]["source"] == "b.txt"
+    assert debug["retrieval"]["matches"][0]["text"] == "Saturn has rings."
+    assert debug["retrieval"]["matches"][0]["chunk_id"] == 0
+    assert debug["retrieval"]["matches"][0]["score"] == 1.0
+    assert debug["source_files"] == [str(second.resolve())]
     assert debug["prompt"]["input_token_upper_bound"] + 32 <= 6000
     client = cli_components.instances[0]
     assert client.prompt_tokenizer.model == "qwen2.5:1.5b"
@@ -81,12 +84,57 @@ def test_cli_ingests_files_searches_real_faiss_and_prints_answer_sources_and_deb
     assert "Cats purr." not in client.calls[0][0]
 
 
+@pytest.mark.parametrize("same_basename", [False, True])
+def test_cli_deduplicates_files_but_preserves_every_selected_chunk(
+    tmp_path, qwen_tokenizer, cli_components, capsys, same_basename,
+):
+    first = tmp_path / "a" / "notes.md"
+    second = tmp_path / "b" / ("notes.md" if same_basename else "other.txt")
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("Saturn has rings.Saturn has moons.", encoding="utf-8")
+    second.write_text("Saturn is large.", encoding="utf-8")
+    rag_cli.main([
+        str(first), str(second), *arguments(tmp_path),
+        "--chunk-size", "17", "--overlap", "0", "--top-k", "3",
+    ])
+
+    output = capsys.readouterr()
+    source_lines = output.out.split("Source files:\n", 1)[1].splitlines()
+    expected_names = [str(first.resolve()), str(second.resolve())] if same_basename else ["notes.md", "other.txt"]
+    assert sorted(source_lines) == sorted(f"- {name}" for name in expected_names)
+    assert "chunk_id=" not in output.out
+    debug = debug_json(output.err)
+    selected = debug["prompt"]["selected"]
+    assert len(selected) == 3
+    assert {(item["path"], item["chunk_id"]) for item in selected} == {
+        (str(first.resolve()), 0), (str(first.resolve()), 1), (str(second.resolve()), 0),
+    }
+    assert debug["source_files"] == list(dict.fromkeys(item["path"] for item in selected))
+
+
+def test_cli_normal_output_has_sources_without_chunk_debug(
+    tmp_path, qwen_tokenizer, cli_components, capsys,
+):
+    source = tmp_path / "notes.md"
+    source.write_text("Saturn has rings.", encoding="utf-8")
+    args = arguments(tmp_path)
+    args.remove("--debug")
+    rag_cli.main([str(source), *args])
+
+    output = capsys.readouterr()
+    assert output.out == "Saturn has rings.\n\nSource files:\n- notes.md\n"
+    assert output.err == ""
+
+
 def test_cli_no_useful_matches_does_not_generate(tmp_path, qwen_tokenizer, cli_components, capsys):
     source = tmp_path / "a.md"
     source.write_text("Cats purr.", encoding="utf-8")
     rag_cli.main([str(source), *arguments(tmp_path)])
     output = capsys.readouterr()
     assert "information is not available" in output.out
+    assert "No context sources supplied" in output.out
+    assert "Source files:" not in output.out
     assert debug_json(output.err)["status"] == "no_retrieval_matches"
     assert cli_components.instances[0].calls == []
 
@@ -152,7 +200,7 @@ def test_real_end_to_end_rag_query():
         env=environment, capture_output=True, text=True, timeout=180,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert "Context sources:" in completed.stdout
+    assert "Source files:\n- context.txt" in completed.stdout
     debug = debug_json(completed.stderr)
     assert debug["status"] == "generated"
     assert debug["retrieval"]["min_score"] == 0.3
