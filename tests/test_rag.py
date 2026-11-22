@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from math import inf, nextafter
 from pathlib import Path
 
 import pytest
@@ -145,3 +146,79 @@ def test_service_imports_no_native_retrieval_or_model_libraries():
         capture_output=True, text=True, timeout=10,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+@pytest.fixture
+def scored_retriever():
+    """Known vectors test policy mechanics, not an embedding model's semantics."""
+    import numpy as np
+    from local_rag_chat.index import FaissIndex
+    from local_rag_chat.retrieval import Retriever
+
+    class QueryEmbedder:
+        def embed_documents(self, texts):
+            raise AssertionError("The fixture already supplies indexed vectors.")
+
+        def embed_query(self, text):
+            return np.array({
+                "What is the context limit?": [1, 0],
+                "Who won the football match?": [0, 1],
+                "Borderline question": [1, 1],
+            }[text], dtype=np.float32)
+
+    chunks = [
+        Chunk(Path("limits.md"), 0, "The context limit is 6,000 tokens."),
+        Chunk(Path("setup.txt"), 0, "Install the local runtime before starting the application."),
+    ]
+    return Retriever(QueryEmbedder(), FaissIndex(chunks, np.array([[1, 0], [-1, 0]])))
+
+
+def test_relevant_query_keeps_only_chunks_above_default_cutoff(scored_retriever, qwen_tokenizer):
+    question = "What is the context limit?"
+    raw = scored_retriever.search(question, min_score=None)
+    assert [match.score for match in raw] == [1.0, -1.0]
+    llm = FakeLLM()
+
+    result = RAGService(scored_retriever, llm, qwen_tokenizer).query(question)
+
+    assert result.min_score == 0.3
+    assert result.status == "generated"
+    assert len(result.sources) == 1
+    assert result.sources[0].chunk.source == Path("limits.md")
+    assert result.sources[0].score == 1.0
+    assert "6,000 tokens" in llm.calls[0][0]
+    assert "Install the local runtime" not in llm.calls[0][0]
+    debug = result.debug_info()["retrieval"]
+    assert debug["metric"] == "cosine_similarity"
+    assert debug["threshold_inclusive"] is True
+
+
+def test_unrelated_query_abstains_by_default_without_llm(scored_retriever, qwen_tokenizer):
+    llm = FakeLLM()
+    result = RAGService(scored_retriever, llm, qwen_tokenizer).query("Who won the football match?")
+
+    assert result.status == "no_retrieval_matches"
+    assert result.answer == INSUFFICIENT_CONTEXT_ANSWER
+    assert result.sources == ()
+    assert result.retrieved == ()
+    assert llm.calls == []
+
+
+def test_borderline_score_is_inclusive_and_a_stricter_cutoff_abstains(scored_retriever, qwen_tokenizer):
+    question = "Borderline question"
+    boundary = scored_retriever.search(question, top_k=1)[0].score
+    equal_llm = FakeLLM()
+    equal = RAGService(scored_retriever, equal_llm, qwen_tokenizer).query(
+        question, min_score=boundary,
+    )
+    assert equal.status == "generated"
+    assert equal.sources[0].score == boundary
+    assert len(equal_llm.calls) == 1
+
+    stricter_llm = FakeLLM()
+    stricter = RAGService(scored_retriever, stricter_llm, qwen_tokenizer).query(
+        question, min_score=nextafter(boundary, inf),
+    )
+    assert stricter.status == "no_retrieval_matches"
+    assert stricter.sources == ()
+    assert stricter_llm.calls == []

@@ -1,4 +1,5 @@
 from pathlib import Path
+from math import inf, nextafter
 
 import numpy as np
 import pytest
@@ -37,6 +38,15 @@ def test_threshold_can_return_no_evidence_and_is_inclusive():
     assert results == []
     results = index.search(np.array([1, 0]), min_score=1)
     assert [result.chunk for result in results] == [chunks[1]]
+
+
+def test_cutoff_uses_reported_score_without_rounding_threshold_down():
+    index, _, _ = make_index()
+    query = np.array([1, 1], dtype=np.float32)
+    boundary = index.search(query, top_k=1)[0].score
+
+    assert len(index.search(query, top_k=1, min_score=boundary)) == 1
+    assert index.search(query, min_score=nextafter(boundary, inf)) == []
 
 
 @pytest.mark.parametrize(

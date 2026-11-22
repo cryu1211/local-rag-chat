@@ -43,9 +43,12 @@ def cli_components(monkeypatch):
     return FakeLLM
 
 
-def arguments(tmp_path):
-    return ["--model-path", str(tmp_path / "embedding"), "--tokenizer-path", str(tmp_path / "tokenizer"),
-            "--query", "What surrounds Saturn?", "--top-k", "2", "--min-score", "0.5", "--debug"]
+def arguments(tmp_path, min_score=0.5):
+    args = ["--model-path", str(tmp_path / "embedding"), "--tokenizer-path", str(tmp_path / "tokenizer"),
+            "--query", "What surrounds Saturn?", "--top-k", "2", "--debug"]
+    if min_score is not None:
+        args.extend(["--min-score", str(min_score)])
+    return args
 
 
 def debug_json(stderr):
@@ -88,6 +91,19 @@ def test_cli_no_useful_matches_does_not_generate(tmp_path, qwen_tokenizer, cli_c
     assert cli_components.instances[0].calls == []
 
 
+def test_cli_default_cutoff_rejects_unrelated_context(tmp_path, qwen_tokenizer, cli_components, capsys):
+    source = tmp_path / "a.md"
+    source.write_text("Cats purr.", encoding="utf-8")
+    rag_cli.main([str(source), *arguments(tmp_path, min_score=None)])
+
+    output = capsys.readouterr()
+    assert "information is not available" in output.out
+    debug = debug_json(output.err)
+    assert debug["retrieval"]["min_score"] == 0.3
+    assert debug["status"] == "no_retrieval_matches"
+    assert cli_components.instances[0].calls == []
+
+
 def test_cli_blank_corpus_reports_no_documents_before_loading_models(tmp_path, capsys):
     source = tmp_path / "empty.txt"
     source.write_text(" \n", encoding="utf-8")
@@ -125,18 +141,34 @@ def test_real_end_to_end_rag_query():
         pytest.skip("Set LOCAL_RAG_MODEL_PATH and LOCAL_QWEN_TOKENIZER_PATH to provisioned directories.")
     environment = os.environ.copy()
     environment.pop("OMP_NUM_THREADS", None)  # Exercise this CLI's own startup default.
-    completed = subprocess.run(
-        [sys.executable, "-m", "local_rag_chat", "examples/architecture.md", "examples/context.txt",
+    command = [sys.executable, "-m", "local_rag_chat", "examples/architecture.md", "examples/context.txt",
          "--model-path", embedding, "--tokenizer-path", tokenizer,
          "--model", os.environ.get("OLLAMA_TEST_MODEL", "qwen2.5:1.5b"),
          "--host", os.environ.get("OLLAMA_TEST_HOST", "http://127.0.0.1:11434"),
          "--query", "How many tokens is the total context limit?",
-         "--min-score", "0.3", "--top-k", "3", "--max-tokens", "128", "--debug"],
+         "--top-k", "3", "--max-tokens", "128", "--debug"]
+    completed = subprocess.run(
+        command,
         env=environment, capture_output=True, text=True, timeout=180,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert "Context sources:" in completed.stdout
     debug = debug_json(completed.stderr)
     assert debug["status"] == "generated"
+    assert debug["retrieval"]["min_score"] == 0.3
     assert debug["prompt"]["selected"]
     assert debug["prompt"]["input_token_upper_bound"] + 128 <= 6000
+
+    # An unrelated question must abstain even when inference is unreachable.
+    unrelated = command.copy()
+    unrelated[unrelated.index("--query") + 1] = "What is the recipe for chocolate cake?"
+    unrelated[unrelated.index("--host") + 1] = "http://127.0.0.1:1"
+    completed = subprocess.run(
+        unrelated, env=environment, capture_output=True, text=True, timeout=180,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "information is not available in the provided documents" in completed.stdout
+    debug = debug_json(completed.stderr)
+    assert debug["status"] == "no_retrieval_matches"
+    assert debug["retrieval"]["matches"] == []
+    assert debug["prompt"]["selected"] == []

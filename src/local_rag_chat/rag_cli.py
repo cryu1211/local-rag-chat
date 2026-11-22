@@ -16,7 +16,7 @@ from .generation import CONTEXT_WINDOW, LLMError
 from .index import FaissIndex
 from .loading import load_documents
 from .ollama import OllamaClient
-from .rag import NoDocumentsError, RAGService
+from .rag import DEFAULT_MIN_SCORE, NoDocumentsError, RAGService
 from .retrieval import Retriever
 from .tokenization import load_prompt_tokenizer
 
@@ -32,7 +32,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--timeout", type=float, default=120)
     parser.add_argument("--max-tokens", type=int, default=128, help="Reserved maximum output tokens")
     parser.add_argument("--top-k", type=int, default=5)
-    parser.add_argument("--min-score", type=float, help="Optional calibrated cosine cutoff in [-1, 1]")
+    parser.add_argument(
+        "--min-score", type=float, default=DEFAULT_MIN_SCORE,
+        help="Minimum cosine relevance in [-1, 1] (default: %(default)s; heuristic)",
+    )
     parser.add_argument("--chunk-size", type=int, default=600, help="Characters per chunk")
     parser.add_argument("--overlap", type=int, default=100)
     parser.add_argument("--system-instructions", help="Additional instructions; grounding rules remain required")

@@ -9,6 +9,11 @@ from .prompting import INSUFFICIENT_CONTEXT_ANSWER, PreparedPrompt, build_prompt
 from .tokenization import PromptTokenizer
 
 
+# the threshold is heuristic, dataset-dependent, model-dependent, and query-dependent;
+# callers can override it per query
+DEFAULT_MIN_SCORE = 0.3
+
+
 class NoDocumentsError(ValueError):
     """A query was attempted before any non-blank document chunks were indexed."""
 
@@ -51,7 +56,9 @@ class RAGResult:
             "retrieval": {
                 "indexed_chunks": self.indexed_chunks,
                 "top_k": self.top_k,
+                "metric": "cosine_similarity",
                 "min_score": self.min_score,
+                "threshold_inclusive": True,
                 "matches": [
                     {
                         "rank": i, "source": hit.chunk.source.name,
@@ -84,7 +91,7 @@ class RAGService:
         self,
         question: str,
         top_k: int = 5,
-        min_score: float | None = None,
+        min_score: float | None = DEFAULT_MIN_SCORE,
         max_context_tokens: int = CONTEXT_WINDOW,
         reserved_output_tokens: int = 512,
         system_instructions: str | None = None,

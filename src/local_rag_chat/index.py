@@ -54,5 +54,6 @@ class FaissIndex:
         return [
             SearchResult(chunk=self._chunks[int(row)], score=float(score))
             for score, row in zip(scores[0], rows[0])
-            if min_score is None or score >= min_score
+            # Return only those above the optional threshold
+            if min_score is None or float(score) >= min_score
         ]
