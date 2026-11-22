@@ -118,6 +118,7 @@ def test_redirects_are_not_followed(fake_ollama):
     assert len(fake_ollama.requests) == 1
 
 
+@pytest.mark.architecture
 def test_stopped_server_has_actionable_error(monkeypatch):
     client = OllamaClient()
 
@@ -186,10 +187,11 @@ def test_cli_failure_prints_error_without_traceback(fake_ollama, capsys):
     assert "Traceback" not in output.err
 
 
-def test_llm_entry_point_does_not_import_retrieval_native_libraries():
+@pytest.mark.architecture
+def test_llm_entry_point_does_not_import_ui_or_retrieval_native_libraries():
     completed = subprocess.run(
         [sys.executable, "-c", "import sys; import local_rag_chat.llm_cli; "
-         "assert not {'faiss', 'torch', 'sentence_transformers', "
+         "assert not {'faiss', 'torch', 'sentence_transformers', 'streamlit', "
          "'local_rag_chat.retrieval'} & sys.modules.keys()"],
         capture_output=True, text=True, timeout=10,
     )
@@ -215,6 +217,7 @@ QWEN_MODEL_INFO = {
 }
 
 
+@pytest.mark.architecture
 def test_bounded_generation_uses_exact_wire_prompt_and_output_reserve(fake_ollama, qwen_tokenizer):
     prompt = build_prompt("What is known?", [], qwen_tokenizer, reserved_output_tokens=32)
     fake_ollama.replies = [

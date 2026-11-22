@@ -7,6 +7,7 @@ from local_rag_chat.loading import document_from_bytes, load_documents
 from local_rag_chat.models import Document
 
 
+@pytest.mark.architecture
 def test_loads_utf8_files_preserves_metadata_and_deduplicates(tmp_path):
     markdown = tmp_path / "notes.MD"
     plain = tmp_path / "notes.txt"
@@ -21,6 +22,7 @@ def test_loads_utf8_files_preserves_metadata_and_deduplicates(tmp_path):
     ]
 
 
+@pytest.mark.architecture
 def test_rejects_unsupported_missing_and_non_utf8_files(tmp_path):
     with pytest.raises(ValueError, match="Unsupported"):
         load_documents([tmp_path / "file.pdf"])
@@ -54,6 +56,7 @@ def test_chunk_overlap_covers_text_without_redundant_tail():
     assert chunks[0].text + chunks[1].text[2:] == "abcdefghij"
 
 
+@pytest.mark.architecture
 def test_chunks_preserve_tail_whitespace_and_document_boundaries():
     documents = [
         Document(Path("a/notes.txt"), " abcdefghi "),

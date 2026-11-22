@@ -73,6 +73,7 @@ def test_query_coordinates_components_and_preserves_structured_evidence(qwen_tok
     json.dumps(debug)
 
 
+@pytest.mark.architecture
 def test_sources_include_only_context_that_fits_not_every_retrieval_match(qwen_tokenizer):
     huge = SearchResult(Chunk(Path("excluded.md"), 1, "x" * 7000), 0.99)
     small = hit(chunk_id=2)
@@ -87,6 +88,7 @@ def test_sources_include_only_context_that_fits_not_every_retrieval_match(qwen_t
     assert result.debug_info()["retrieval"]["matches"][0]["selected"] is False
 
 
+@pytest.mark.architecture
 def test_attribution_matches_prompt_metadata_and_deduplicates_files(qwen_tokenizer):
     first = SearchResult(Chunk(Path("a/notes.md"), 7, "First evidence."), 0.95)
     repeated_file = SearchResult(Chunk(Path("a/notes.md"), 8, "More evidence."), 0.8)
@@ -120,6 +122,7 @@ def test_attribution_matches_prompt_metadata_and_deduplicates_files(qwen_tokeniz
     }
 
 
+@pytest.mark.architecture
 def test_no_indexed_documents_fails_without_retrieval_or_generation(qwen_tokenizer):
     retriever = FakeRetriever(chunk_count=0)
     llm = FakeLLM()
@@ -158,6 +161,7 @@ def test_all_retrieved_context_over_budget_abstains_without_calling_llm(qwen_tok
     assert llm.calls == []
 
 
+@pytest.mark.architecture
 def test_llm_failure_propagates_instead_of_producing_a_fallback_answer(qwen_tokenizer):
     failure = LLMError("Cannot reach Ollama; start ollama serve.")
     llm = FakeLLM(error=failure)
@@ -165,6 +169,17 @@ def test_llm_failure_propagates_instead_of_producing_a_fallback_answer(qwen_toke
         RAGService(FakeRetriever([hit()]), llm, qwen_tokenizer).query("Question?")
     assert caught.value is failure
     assert len(llm.calls) == 1
+
+
+@pytest.mark.architecture
+@pytest.mark.parametrize("question", ["", " \n\t"])
+def test_empty_question_fails_before_retrieval_or_generation(qwen_tokenizer, question):
+    retriever = FakeRetriever([hit()])
+    llm = FakeLLM()
+    with pytest.raises(ValueError, match="Question must not be blank"):
+        RAGService(retriever, llm, qwen_tokenizer).query(question)
+    assert retriever.calls == []
+    assert llm.calls == []
 
 
 def test_large_question_fails_before_query_embedding_or_generation(qwen_tokenizer):
@@ -176,10 +191,12 @@ def test_large_question_fails_before_query_embedding_or_generation(qwen_tokenize
     assert llm.calls == []
 
 
-def test_service_imports_no_native_retrieval_or_model_libraries():
+@pytest.mark.architecture
+def test_service_imports_no_ui_runtime_adapter_or_native_libraries():
     completed = subprocess.run(
         [sys.executable, "-c", "import sys; import local_rag_chat.rag; "
-         "assert not {'faiss', 'torch', 'sentence_transformers'} & sys.modules.keys()"],
+         "assert not {'faiss', 'torch', 'sentence_transformers', 'streamlit', "
+         "'local_rag_chat.ollama', 'local_rag_chat.application'} & sys.modules.keys()"],
         capture_output=True, text=True, timeout=10,
     )
     assert completed.returncode == 0, completed.stderr

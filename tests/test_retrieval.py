@@ -19,6 +19,7 @@ def make_index():
     return FaissIndex(chunks, vectors), chunks, vectors
 
 
+@pytest.mark.architecture
 def test_real_faiss_cosine_ranking_metadata_and_bounded_top_k():
     index, chunks, vectors = make_index()
     query = np.array([8, 0], dtype=np.float32)

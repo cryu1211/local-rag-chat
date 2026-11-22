@@ -30,3 +30,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "architecture: focused, model-free tests of pipeline boundaries and invariants",
+]

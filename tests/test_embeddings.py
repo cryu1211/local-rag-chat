@@ -8,6 +8,7 @@ import pytest
 from local_rag_chat.embeddings import SentenceTransformerEmbedder
 
 
+@pytest.mark.architecture
 def test_adapter_loads_only_local_files_and_refuses_truncation(tmp_path, monkeypatch):
     calls = []
 

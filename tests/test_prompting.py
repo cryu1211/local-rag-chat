@@ -15,6 +15,7 @@ def result(text, score=0.9, chunk_id=0, source="notes.md"):
     return SearchResult(Chunk(Path(source), chunk_id, text), score)
 
 
+@pytest.mark.architecture
 def test_small_prompt_preserves_sources_grounding_and_accounting(qwen_tokenizer):
     hit = result("The context limit is 6,000 tokens.", chunk_id=7, source="docs/limits.md")
     prompt = build_prompt("What is the context limit?", [hit], qwen_tokenizer,
@@ -55,6 +56,7 @@ def test_oversized_chunk_is_skipped_and_lower_ranked_context_can_fit(qwen_tokeni
     assert prompt.usage.upper_bound <= prompt.input_budget
 
 
+@pytest.mark.architecture
 def test_selection_counts_accumulated_context_not_each_chunk_in_isolation(qwen_tokenizer):
     hits = [result(str(i) * 1500, score=1 - i / 10, chunk_id=i) for i in range(4)]
     for hit in hits:
@@ -67,6 +69,7 @@ def test_selection_counts_accumulated_context_not_each_chunk_in_isolation(qwen_t
     assert prompt.usage.upper_bound + prompt.reserved_output_tokens <= 6000
 
 
+@pytest.mark.architecture
 def test_exact_bound_is_accepted_but_one_more_byte_skips_chunk(qwen_tokenizer):
     hit = result("Evidence. " * 30)
     first = build_prompt("Question?", [hit], qwen_tokenizer, reserved_output_tokens=100)
@@ -82,6 +85,7 @@ def test_exact_bound_is_accepted_but_one_more_byte_skips_chunk(qwen_tokenizer):
     assert over.skipped[0].candidate_upper_bound == over.input_budget + 1
 
 
+@pytest.mark.architecture
 def test_long_question_is_rejected_before_context_is_considered(qwen_tokenizer):
     def unused_retrieval():
         raise AssertionError("The fixed prompt must be checked first.")
