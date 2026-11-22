@@ -32,6 +32,10 @@ class FaissIndex:
         self._index = faiss.IndexFlatIP(matrix.shape[1])
         self._index.add(matrix)
 
+    @property
+    def chunk_count(self) -> int:
+        return len(self._chunks)
+
     def search(
         self,
         query_vector: NDArray[np.float32],

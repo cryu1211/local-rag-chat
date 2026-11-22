@@ -10,6 +10,10 @@ class Retriever:
         self._embedder = embedder
         self._index = index
 
+    @property
+    def chunk_count(self) -> int:
+        return self._index.chunk_count
+
     def search(
         self, question: str, top_k: int = 5, min_score: float | None = None
     ) -> list[SearchResult]:
