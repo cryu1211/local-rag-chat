@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from .generation import CONTEXT_WINDOW, LLMError
-from .tokenization import QwenPromptTokenizer
+from .tokenization import PromptTokenizer
 
 
 class _NoRedirects(HTTPRedirectHandler):
@@ -24,7 +24,7 @@ class OllamaClient:
         model: str = "qwen2.5:1.5b",
         host: str = "http://127.0.0.1:11434",
         timeout: float = 120.0,
-        prompt_tokenizer: QwenPromptTokenizer | None = None,
+        prompt_tokenizer: PromptTokenizer | None = None,
     ) -> None:
         if not model.strip():
             raise ValueError("Model name must not be blank.")
@@ -59,9 +59,10 @@ class OllamaClient:
             raise ValueError("Prompt must not be blank.")
         if type(max_tokens) is not int or not 0 < max_tokens < CONTEXT_WINDOW:
             raise ValueError(f"Maximum output tokens must be an integer from 1 to {CONTEXT_WINDOW-1}.")
+        tokenizer = self.prompt_tokenizer
         bound = None
-        if self.prompt_tokenizer is not None:
-            bound = self.prompt_tokenizer.token_upper_bound(prompt)
+        if tokenizer is not None:
+            bound = tokenizer.token_upper_bound(prompt)
             # Recheck the output token limit against the context window, since the prompt may have been truncated
             if bound + max_tokens > CONTEXT_WINDOW:
                 raise ValueError(
@@ -88,19 +89,12 @@ class OllamaClient:
                 "temperature": 0,
             },
         }
-        if bound is not None:
-            # The byte bound only applies to this text tokenizer. Fail closed for
-            # other architectures, tokenization policies, or model formats.
-            details = info.get("details", {})
-            if (
-                not isinstance(details, dict) or details.get("format") != "gguf"
-                or metadata.get("general.architecture") != "qwen2"
-                or metadata.get("tokenizer.ggml.model") != "gpt2"
-                or metadata.get("tokenizer.ggml.pre") != "qwen2"
-                or metadata.get("tokenizer.ggml.add_bos_token") is not False
-                or metadata.get("tokenizer.ggml.add_eos_token") not in (None, False)
-            ):
-                raise LLMError("Bounded generation requires the supported Qwen2 GGUF byte-BPE model.")
+        if tokenizer is not None:
+            # Each adapter owns the runtime assumptions behind its token bound.
+            try:
+                tokenizer.validate_model_info(info)
+            except ValueError as error:
+                raise LLMError(str(error)) from error
             payload.update({"raw": True, "truncate": False, "shift": False})
         result = self._post_json("/api/generate", payload)
         if bound is not None:

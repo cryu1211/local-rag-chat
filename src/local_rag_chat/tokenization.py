@@ -2,6 +2,7 @@
 
 import json
 import unicodedata
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
@@ -19,6 +20,10 @@ class PromptTokenizer(Protocol):
 
     def token_upper_bound(self, serialized: str) -> int:
         """Return a conservative bound for this tokenizer and serialization policy."""
+        ...
+
+    def validate_model_info(self, info: dict[str, object]) -> None:
+        """Reject runtime metadata that does not support this tokenizer's bound."""
         ...
 
 
@@ -78,3 +83,34 @@ class QwenPromptTokenizer:
             self.count_tokens(serialized),
             len(serialized.encode("utf-8")) + self.RUNTIME_SPECIAL_TOKEN_ALLOWANCE,
         )
+
+    def validate_model_info(self, info: dict[str, object]) -> None:
+        metadata = info.get("model_info")
+        details = info.get("details")
+        if (
+            not isinstance(details, dict) or details.get("format") != "gguf"
+            or not isinstance(metadata, dict)
+            or metadata.get("general.architecture") != "qwen2"
+            or metadata.get("tokenizer.ggml.model") != "gpt2"
+            or metadata.get("tokenizer.ggml.pre") != "qwen2"
+            or metadata.get("tokenizer.ggml.add_bos_token") is not False
+            or metadata.get("tokenizer.ggml.add_eos_token") not in (None, False)
+        ):
+            raise ValueError("Bounded generation requires the supported Qwen2 GGUF byte-BPE model.")
+
+
+# Factories, not shared instances: tokenizer assets are loaded only on demand.
+TOKENIZER_FACTORIES: dict[str, Callable[[Path, str], PromptTokenizer]] = {
+    "qwen2.5:1.5b": QwenPromptTokenizer,
+}
+
+
+def load_prompt_tokenizer(model: str, directory: Path) -> PromptTokenizer:
+    model = model.strip()
+    factory = TOKENIZER_FACTORIES.get(model)
+    if factory is None:
+        raise ValueError(
+            f"No prompt tokenizer is registered for '{model}'. "
+            f"Supported models: {', '.join(TOKENIZER_FACTORIES)}."
+        )
+    return factory(directory, model)

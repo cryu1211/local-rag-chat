@@ -279,3 +279,29 @@ def test_real_ollama_bounded_prompt():
         prompt_tokenizer=tokenizer,
     )
     assert client.generate(prompt.text, prompt.reserved_output_tokens).strip()
+
+
+def test_bounded_client_delegates_validation_to_another_tokenizer_profile(fake_ollama):
+    class TestTokenizer:
+        model = "test-model"
+
+        def serialize(self, instructions, user_text):
+            return instructions + "\n" + user_text
+
+        def count_tokens(self, text):
+            return len(text.encode("utf-8"))
+
+        def token_upper_bound(self, text):
+            return self.count_tokens(text) + 2
+
+        def validate_model_info(self, info):
+            if info["model_info"]["general.architecture"] != "test-architecture":
+                raise ValueError("Expected the test architecture.")
+
+    fake_ollama.replies = [
+        (200, {"model_info": {"general.architecture": "test-architecture"}}),
+        (200, {**COMPLETE_RESPONSE, "prompt_eval_count": 5, "eval_count": 3}),
+    ]
+    client = OllamaClient(model="test-model", host=fake_ollama.host, prompt_tokenizer=TestTokenizer())
+    assert client.generate("Hello", 16) == COMPLETE_RESPONSE["response"]
+    assert fake_ollama.requests[1][1]["raw"] is True

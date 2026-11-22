@@ -8,6 +8,7 @@ import pytest
 from local_rag_chat.models import Chunk, SearchResult
 from local_rag_chat.prompting import GROUNDING_INSTRUCTIONS, PromptBudgetError, build_prompt
 from local_rag_chat.tokenization import QwenPromptTokenizer
+from local_rag_chat.tokenization import TOKENIZER_FACTORIES, load_prompt_tokenizer
 
 
 def result(text, score=0.9, chunk_id=0, source="notes.md"):
@@ -145,3 +146,28 @@ def test_real_local_qwen_tokenizer():
     prompt = build_prompt("What is the context limit?", [result("The limit is 6,000 tokens.")], tokenizer)
     assert prompt.usage.total <= prompt.usage.upper_bound <= prompt.input_budget
     assert prompt.usage.total < len(prompt.text.encode("utf-8"))
+
+
+def test_registered_tokenizer_loads_local_assets(qwen_tokenizer, tmp_path):
+    tokenizer = load_prompt_tokenizer("qwen2.5:1.5b", tmp_path / "tokenizer")
+    assert tokenizer.model == "qwen2.5:1.5b"
+    prompt = build_prompt("Question?", [], tokenizer)
+    assert prompt.usage.upper_bound <= prompt.input_budget
+
+
+def test_tokenizer_factories_are_called_only_when_selected(qwen_tokenizer, tmp_path, monkeypatch):
+    calls = []
+
+    def factory(directory, model):
+        calls.append((directory, model))
+        return qwen_tokenizer
+
+    monkeypatch.setitem(TOKENIZER_FACTORIES, "test-profile", factory)
+    assert calls == []
+    assert load_prompt_tokenizer("test-profile", tmp_path) is qwen_tokenizer
+    assert calls == [(tmp_path, "test-profile")]
+
+
+def test_unknown_model_fails_before_loading_assets(tmp_path):
+    with pytest.raises(ValueError, match="No prompt tokenizer is registered for 'unknown-model'"):
+        load_prompt_tokenizer("unknown-model", tmp_path / "missing")
