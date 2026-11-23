@@ -10,11 +10,11 @@ from numpy.typing import NDArray
 
 
 class Embedder(Protocol):
+    """Keep the document and query sperate to allow models with distinct instructions for each."""
     def embed_documents(self, texts: Sequence[str]) -> NDArray[np.float32]:
         """Return a finite (number of texts, embedding dimension) matrix.
 
         Documents and queries must use compatible encodings from the same model.
-        Normalization belongs to the index, so adapters need not normalize.
         """
         ...
 
@@ -71,8 +71,8 @@ class SentenceTransformerEmbedder:
             if length > self._model.max_seq_length:
                 raise ValueError(
                     f"Embedding input {position} has {length} tokens; the model limit "
-                    f"is {self._model.max_seq_length}. Reduce --chunk-size for "
-                    "documents, or shorten the query. No input was truncated."
+                    f"is {self._model.max_seq_length}. Reduce the document chunk size "
+                    "or shorten the query. No input was truncated."
                 )
 
         vectors = self._model.encode(

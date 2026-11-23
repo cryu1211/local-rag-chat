@@ -42,8 +42,16 @@ class QwenPromptTokenizer:
         if not model.strip():
             raise ValueError("Tokenizer model name must not be blank.")
         directory = directory.expanduser().resolve()
-        config = json.loads((directory / "tokenizer_config.json").read_text(encoding="utf-8"))
-        data = json.loads((directory / "tokenizer.json").read_text(encoding="utf-8"))
+        try:
+            config = json.loads((directory / "tokenizer_config.json").read_text(encoding="utf-8"))
+            data = json.loads((directory / "tokenizer.json").read_text(encoding="utf-8"))
+        except (UnicodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"Invalid tokenizer JSON in {directory}. Re-provision the tokenizer assets.") from error
+        if (
+            not isinstance(config, dict) or not isinstance(data, dict)
+            or not isinstance(data.get("model"), dict)
+        ):
+            raise ValueError(f"Invalid tokenizer asset schema in {directory}. Re-provision the tokenizer assets.")
         if (
             config.get("tokenizer_class") != "Qwen2Tokenizer"
             or config.get("add_bos_token") is not False
@@ -54,7 +62,14 @@ class QwenPromptTokenizer:
 
         from tokenizers import Tokenizer
 
-        self._tokenizer = Tokenizer.from_file(str(directory / "tokenizer.json"))
+        try:
+            self._tokenizer = Tokenizer.from_file(str(directory / "tokenizer.json"))
+        except Exception as error:
+            # The native loader reports malformed BPE assets as a generic Exception.
+            # Translate only this external call, not unrelated application errors.
+            raise ValueError(
+                f"Cannot load tokenizer assets from {directory}: {error}. Re-provision the tokenizer assets."
+            ) from error
         self._tokenizer.no_truncation()
         self._tokenizer.no_padding()
         # These must remain model control tokens, not sequences of ordinary text.
