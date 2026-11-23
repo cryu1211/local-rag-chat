@@ -181,6 +181,9 @@ and click **Index documents**. A success message shows file/chunk counts. Ask a
 question in the chat input; answers show source filenames. Expand
 **Retrieval and token budget** for diagnostics. Local model paths, model name,
 and Ollama host are configurable in the sidebar.
+Expand **Chunking settings** to adjust character chunk size and overlap. If
+token-dense text exceeds the embedding model's separate input limit, reduce the
+chunk size and keep overlap smaller than the new size before indexing again.
 
 The project [Streamlit configuration](.streamlit/config.toml) binds to loopback
 and disables usage telemetry. Run from the repository root so it is loaded.

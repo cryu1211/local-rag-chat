@@ -48,6 +48,10 @@ def main() -> None:
                 tokenizer_path = st.text_input("Tokenizer path", "./models/qwen2.5-1.5b-tokenizer")
                 model = st.text_input("Ollama model", "qwen2.5:1.5b")
                 host = st.text_input("Ollama host", "http://127.0.0.1:11434")
+            with st.expander("Chunking settings"):
+                chunk_size = st.number_input("Chunk size (characters)", min_value=1, value=600, step=1)
+                overlap = st.number_input("Overlap (characters)", min_value=0, value=100, step=1)
+                st.caption("For token-dense text, reduce chunk size. Overlap must be smaller than chunk size.")
             ingest = st.form_submit_button("Index documents", type="primary")
         st.caption("Indexing replaces the current documents and clears the chat.")
 
@@ -69,6 +73,7 @@ def main() -> None:
             with st.spinner("Indexing documents locally…"):
                 st.session_state["corpus"] = index_documents(
                     documents, Path(model_path), Path(tokenizer_path), model=model, host=host,
+                    chunk_size=chunk_size, overlap=overlap,
                 )
         except (OSError, ValueError, LLMError) as error:
             st.error(str(error))
