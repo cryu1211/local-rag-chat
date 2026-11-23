@@ -166,25 +166,68 @@ def test_invalid_generation_input_fails_before_network_request(fake_ollama, prom
     assert fake_ollama.requests == []
 
 
-def test_cli_configuration_and_output(fake_ollama, capsys):
-    llm_cli.main(["--model", "test-model", "--host", fake_ollama.host,
+def test_cli_configuration_and_output(fake_ollama, qwen_tokenizer, tmp_path, capsys):
+    wire = qwen_tokenizer.serialize("You are a helpful assistant.", "Explain RAG")
+    fake_ollama.replies = [
+        (200, QWEN_MODEL_INFO),
+        (200, {**COMPLETE_RESPONSE, "prompt_eval_count": qwen_tokenizer.count_tokens(wire), "eval_count": 12}),
+    ]
+    llm_cli.main(["--model", "qwen2.5:1.5b", "--host", fake_ollama.host,
+                  "--tokenizer-path", str(tmp_path / "tokenizer"),
                   "--max-tokens", "16", "--timeout", "3", "--prompt", "Explain RAG"])
     output = capsys.readouterr()
     assert output.out == COMPLETE_RESPONSE["response"] + "\n"
     assert output.err == ""
     assert fake_ollama.requests[1][1]["options"]["num_predict"] == 16
-    assert fake_ollama.requests[1][1]["model"] == "test-model"
+    assert fake_ollama.requests[1][1]["model"] == "qwen2.5:1.5b"
+    assert fake_ollama.requests[1][1]["prompt"] == wire
+    assert fake_ollama.requests[1][1]["raw"] is True
+    assert fake_ollama.requests[1][1]["truncate"] is False
+    assert fake_ollama.requests[1][1]["shift"] is False
 
 
-def test_cli_failure_prints_error_without_traceback(fake_ollama, capsys):
+def test_cli_failure_prints_error_without_traceback(fake_ollama, qwen_tokenizer, tmp_path, capsys):
     fake_ollama.replies = [(500, {"error": "not enough memory"})]
     with pytest.raises(SystemExit) as error:
-        llm_cli.main(["--host", fake_ollama.host])
+        llm_cli.main(["--host", fake_ollama.host, "--tokenizer-path", str(tmp_path / "tokenizer")])
     assert error.value.code == 1
     output = capsys.readouterr()
     assert output.out == ""
     assert "error: Ollama request failed (HTTP 500): not enough memory" in output.err
     assert "Traceback" not in output.err
+
+
+def test_cli_oversized_prompt_is_rejected_before_http(fake_ollama, qwen_tokenizer, tmp_path, capsys):
+    with pytest.raises(SystemExit) as error:
+        llm_cli.main([
+            "--host", fake_ollama.host, "--tokenizer-path", str(tmp_path / "tokenizer"),
+            "--prompt", "hello " * 7000,
+        ])
+    assert error.value.code == 1
+    assert "exceeds the 6000-token context window" in capsys.readouterr().err
+    assert fake_ollama.requests == []
+
+
+@pytest.mark.parametrize("prompt", ["", " \n\t"])
+def test_cli_blank_prompt_is_rejected_before_loading_assets(prompt, capsys):
+    with pytest.raises(SystemExit) as error:
+        llm_cli.main(["--prompt", prompt, "--tokenizer-path", "/missing/tokenizer"])
+    assert error.value.code == 1
+    assert "Prompt must not be blank" in capsys.readouterr().err
+
+
+def test_cli_invalid_tokenizer_assets_report_error_without_http(fake_ollama, tmp_path, capsys):
+    (tmp_path / "tokenizer_config.json").write_text(json.dumps({
+        "tokenizer_class": "Qwen2Tokenizer", "add_bos_token": False,
+    }))
+    (tmp_path / "tokenizer.json").write_text(json.dumps({"model": {"type": "BPE"}}))
+    with pytest.raises(SystemExit) as error:
+        llm_cli.main(["--host", fake_ollama.host, "--tokenizer-path", str(tmp_path)])
+    assert error.value.code == 1
+    output = capsys.readouterr()
+    assert "Cannot load tokenizer assets" in output.err
+    assert "Traceback" not in output.err
+    assert fake_ollama.requests == []
 
 
 @pytest.mark.architecture

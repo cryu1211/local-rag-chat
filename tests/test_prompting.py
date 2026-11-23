@@ -177,3 +177,19 @@ def test_tokenizer_factories_are_called_only_when_selected(qwen_tokenizer, tmp_p
 def test_unknown_model_fails_before_loading_assets(tmp_path):
     with pytest.raises(ValueError, match="No prompt tokenizer is registered for 'unknown-model'"):
         load_prompt_tokenizer("unknown-model", tmp_path / "missing")
+
+
+@pytest.mark.parametrize("filename,content", [
+    ("tokenizer_config.json", "[]"),
+    ("tokenizer.json", "[]"),
+    ("tokenizer.json", '{"model": []}'),
+    ("tokenizer.json", '{"model": {"type": "BPE"}}'),
+    ("tokenizer.json", '{broken json'),
+])
+def test_malformed_tokenizer_assets_raise_actionable_value_error(
+    qwen_tokenizer, tmp_path, filename, content,
+):
+    directory = tmp_path / "tokenizer"
+    (directory / filename).write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError, match="Re-provision the tokenizer assets"):
+        load_prompt_tokenizer("qwen2.5:1.5b", directory)

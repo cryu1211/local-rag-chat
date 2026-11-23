@@ -33,11 +33,14 @@ def ui(monkeypatch, qwen_tokenizer):
 
     class Embedder:
         instances = 0
+        max_tokens = None
 
         def __init__(self, model_path):
             Embedder.instances += 1
 
         def embed_documents(self, texts):
+            if self.max_tokens is not None and any(len(text) + 2 > self.max_tokens for text in texts):
+                raise ValueError("Embedding input exceeds its token limit. Reduce the document chunk size.")
             return np.array([[1, 0] if "Saturn" in text else [0, 1] for text in texts], dtype=np.float32)
 
         def embed_query(self, text):
@@ -139,6 +142,26 @@ def test_blank_question_does_not_call_generation(ui):
     assert not app.exception
     assert "non-empty question" in app.warning[0].value
     assert app.session_state["answers"] == []
+    assert llm.calls == []
+
+
+def test_token_dense_upload_can_be_reindexed_with_smaller_ui_chunks(ui):
+    app, uploads, embedder, llm = ui
+    # A deterministic one-token-per-character fake, including two special tokens.
+    embedder.max_tokens = 256
+    uploads.append(upload("dense.txt", ("文" * 600).encode("utf-8")))
+    app.button[0].click().run()
+    assert not app.exception
+    assert "Reduce the document chunk size" in app.error[0].value
+    assert app.session_state["corpus"] is None
+
+    app.number_input[0].set_value(200)
+    app.number_input[1].set_value(50)
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error
+    assert app.success[0].value == "Indexed 1 file(s) into 4 chunk(s)."
+    assert not app.chat_input[0].disabled
     assert llm.calls == []
 
 
